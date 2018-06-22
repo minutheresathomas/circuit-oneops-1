@@ -1,13 +1,24 @@
 #!/bin/bash
 
 #Set this boolean value to register the echo statements to a tmp log file
-log_statements=false
+log_statements=true
+
+solr_zk_connection_log="/tmp/solr_zk_check.log"
+touch $solr_zk_connection_log
+chown nagios:nagios $solr_zk_connection_log
 
 log_echo () {
   if [ "$log_statements" = true ]; then
-    echo $1
+    echo $1 >> $solr_zk_connection_log
   fi
 }
+
+log_echo ""
+log_echo ""
+log_echo ""
+log_echo "-----------------------------------------------------------"
+log_echo "Beginning solr zookeeper connection check at $(date)"
+log_echo "-----------------------------------------------------------"
 
 zk_fqdn=<%= node["zk_host_fqdns"]%>
 log_echo "ZK FQDN is $zk_fqdn"
@@ -22,6 +33,7 @@ ping_zk () {
   zk=$1
   (nc $1 2181 </dev/null)
   ret=$?
+  log_echo "ping zk result for $1 : $ret"
   return $ret
 }
 
@@ -30,7 +42,10 @@ has_live_zk=0
 for zk in "${zk_list[@]}"
 do
  if ping_zk "${zk}"; then
- has_live_zk=$((has_live_zk+1))
+   has_live_zk=$((has_live_zk+1))
+   log_echo "Successfully pinged $zk. So live zk number has been increased by 1"
+ else
+   log_echo "Unable to ping $zk."
  fi
 done
 
@@ -51,8 +66,10 @@ log_echo "Percentage of live ZK = $zk_percentage"
 # If percentage of live nodes is greater than 1 display the percentage in monitors
 min=1.00
 if [ 1 -eq "$(echo "${zk_percentage} > ${min}" | bc)" ]; then
+ log_echo "Solr connected to Zookeeper."
  echo "Solr connected to ZooKeeper |up=$zk_percentage"
 else
+ log_echo "Unable to connect to zookeeper."
  echo "NO live ZooKeeper |up=0"
 fi
 
