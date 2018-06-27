@@ -22,7 +22,7 @@ def parseShardListObject(shardList, collectionInfo, cores)
       replicas = collectionInfo["shards"][shard]["replicas"].keys
       replicas.each do |replica|
         replicaCore = collectionInfo["shards"][shard]["replicas"][replica]["core"]
-         if cores.include? replicaCore
+        if cores.include? replicaCore
           replicaState = collectionInfo["shards"][shard]["replicas"][replica]["state"]
           if replicaState == "active"
             active = active + 1
@@ -119,7 +119,7 @@ def checkSolrProcessIsRunning(solrPortNo)
   healthCheckResponse = solr_rest_api_get_auth("127.0.0.1", solrPortNo, healthCheckUrl)
 
   if(healthCheckResponse.code == '200')
-   isRunning = true
+    isRunning = true
   end
 
   return isRunning
@@ -127,9 +127,10 @@ end
 
 def check_solr_process_status_based_on_core_health(host_ip, solr_port_no)
 
-  local_cores = []
+  total_cores = []
   down_cores = []
   recovering_cores = []
+  recovery_failed_cores = []
   active_cores = []
 
   solrCollectionUrl = "/solr/admin/collections?"
@@ -138,58 +139,56 @@ def check_solr_process_status_based_on_core_health(host_ip, solr_port_no)
   clusterstatus_url = "#{solrCollectionUrl}action=CLUSTERSTATUS&wt=json"
   cluster_status = solr_rest_api(host_ip, solr_port_no, clusterstatus_url)
 
-  collections = cluster_status["cluster"]["collections"].keys
-
   # Get the json of collections from clusterstatus which includes shard and replica details
   cluster_status_collections = cluster_status["cluster"]["collections"]
 
-  # Iterate through the collections in the cluster status
-  collections.each do |collection|
-    unless cluster_status_collections[collection]["shards"].nil?
+  cluster_status_collections.each { |coll_name, coll_info|
+    unless coll_info["shards"].nil?
+      shards = coll_info["shards"]
+      shards.each { |shard_name, shard_info|
+        unless shard_info["replicas"].nil?
+          replicas = shard_info["replicas"]
+          replicas.each { |replica_name, replica_info|
+            core = replica_info["core"]
+            base_url = replica_info["base_url"]
 
-      # Get all the shard names
-      shards = cluster_status_collections[collection]["shards"].keys
-      shards_list = cluster_status_collections[collection]["shards"]
+            # Get the core information for the current node
+            if base_url.include? host_ip
+              total_cores.push(replica_info["core"])
 
-      shards.each do |shard|
-
-        unless shards_list[shard]["replicas"].nil?
-
-          # Get all the replicas irrespective if shard is active or not
-          replicas = shards_list[shard]["replicas"].keys
-          replicas_list = shards_list[shard]["replicas"]
-
-          replicas.each do |replica|
-
-            if replicas_list[replica]["base_url"].include? host_ip
-              local_cores.push(replicas_list[replica ]["core"])
-
-              if replicas_list[replica]["state"] == "down"
-                if !down_cores.include?( replicas_list[replica]["core"] )
-                  down_cores.push( replicas_list[replica]["core"] )
+              if replica_info["state"] == "down"
+                if !down_cores.include?( replica_info["core"] )
+                  down_cores.push(replica_info["core"])
                 end
               end
 
-              if replicas_list[replica]["state"] == "active"
-                if !active_cores.include?( replicas_list[replica]["core"] )
-                  active_cores.push( replicas_list[replica]["core"] )
+              if replica_info["state"] == "active"
+                if !active_cores.include?( replica_info["core"] )
+                  active_cores.push(replica_info["core"])
                 end
               end
 
-              if replicas_list[replica]["state"] == "recovering"
-                if !recovering_cores.include?( replicas_list[replica]["core"] )
-                  recovering_cores.push( replicas_list[replica]["core"] )
+              if replica_info["state"] == "recovering"
+                if !recovering_cores.include?( replica_info["core"] )
+                  recovering_cores.push(replica_info["core"])
                 end
               end
 
+              if replica_info["state"] == "recovery_failed"
+                if !recovery_failed_cores.include?( replica_info["core"] )
+                  recovery_failed_cores.push(replica_info["core"])
+                end
+              end
             end
-          end
+          }
         end
-      end
-    end
-  end
 
-  return local_cores, down_cores, recovering_cores
+      }
+    end
+
+  }
+
+  return total_cores, active_cores, recovering_cores, down_cores, recovery_failed_cores
 end
 
 def solr_rest_api(host, port, url)
@@ -246,6 +245,35 @@ def solr_rest_api_get_auth(host, port, uri)
 
   return resp
 
+end
+
+def ping_cores(host_ip, port_no, cores, logger)
+  if (!cores.empty? && cores.length != 0)
+
+    ping_ok = 0
+
+    cores.each do |core|
+
+      ping_url = "/solr/#{core}/admin/ping?qi=internal_admin&wt=json"
+      ping_result = solr_rest_api(host_ip, port_no, ping_url)
+      ping_status =  ping_result["status"]
+      logger.info "Ping #{core} - #{ping_status}"
+      if (ping_status == "OK")
+        ping_ok += 1
+      end
+    end
+
+    if (cores.length == ping_ok)
+      logger.info "Solr is up, all cores ok"
+      return true
+    else
+      logger.info "Did not receive ping=OK for all the up cores."
+      return false
+    end
+  else
+    logger.info "cores list #{cores} is empty"
+    return true
+  end
 end
 
 
