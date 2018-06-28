@@ -56,23 +56,26 @@ begin
     logger.info "Checking cores for ip=#{host_ip}, port=#{port_no}"
     total_cores, active_cores, recovering_cores, down_cores, recovery_failed_cores = check_solr_process_status_based_on_core_health(host_ip, port_no)
 
-    logger.info "\n\n total_cores => #{JSON.pretty_generate(total_cores)}"
-    logger.info "\n\n active_cores => #{JSON.pretty_generate(active_cores)}"
-    logger.info "\n\n recovering_cores => #{JSON.pretty_generate(recovering_cores)}"
+    cores_details = Hash.new
+
+    cores_details = {
+            "total_cores" => "#{total_cores}",
+            "active_cores" => "#{active_cores}",
+            "recovering_cores" => "#{recovering_cores}",
+            "down_cores" => "#{down_cores}",
+            "recovery_failed_cores" => "#{recovery_failed_cores}",
+    }
+
+    logger.info "\n\n cores_details => #{JSON.pretty_generate(cores_details)}"
 
     if(recovering_cores.length > 0) && (ping_cores(host_ip, port_no, recovering_cores, logger))
       logger.info "Following recovering cores exist in the current solr node and they are all pingable. solr is up"
-      logger.info "\n\n recovering cores => #{JSON.pretty_generate(recovering_cores)}"
       puts solr_up
     elsif(active_cores.length > 0) && (ping_cores(host_ip, port_no, active_cores, logger))
       logger.info "Following active cores exist in the current solr node and they are all pingable. solr is up"
-      logger.info "\n\n active cores => #{JSON.pretty_generate(active_cores)}"
       puts solr_up
     elsif(total_cores.length > 0)
       logger.info "Following cores exist in the current solr node which are neither active nor recovering. solr is down"
-      logger.info "\n\n total cores => #{JSON.pretty_generate(total_cores)}"
-      logger.info "\n\n down cores => #{JSON.pretty_generate(down_cores)}"
-      logger.info "\n\n recovery failed cores => #{JSON.pretty_generate(recovery_failed_cores)}"
       puts solr_down
     else
       logger.info "None of the conditions to make the solr process down is met. "
